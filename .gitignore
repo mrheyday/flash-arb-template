@@ -13,3 +13,13 @@ states/
 # Optional
 .env
 .env.local
+
+# Foundry
+out/
+cache/
+broadcast/
+lib/
+
+# Forge/Cast
+*.gas-snapshot
+.gas-snapshot
