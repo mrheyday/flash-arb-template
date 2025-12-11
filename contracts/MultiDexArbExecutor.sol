@@ -66,12 +66,10 @@ contract MultiDexArbExecutor is FlashLoanSimpleReceiverBase {
         bytes calldata params
     ) external override returns (bool) {
         (address inToken, uint256 inAmount) = abi.decode(params, (address, uint256));
-
         uint256 uniOut = quoter.quoteExactInputSingle(
             inToken, address(0), UNI_FEE, inAmount, 0
         );
         uint256 uniMin = (uniOut * (10000 - slippageBp)) / 10000;
-
         IERC20(inToken).approve(address(uniRouter), inAmount);
         ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
             tokenIn: inToken,
@@ -84,7 +82,6 @@ contract MultiDexArbExecutor is FlashLoanSimpleReceiverBase {
             sqrtPriceLimitX96: 0
         });
         uniRouter.exactInputSingle(swapParams);
-
         uint256 repay = amount + premium;
         IERC20(asset).approve(address(POOL), repay);
         return true;

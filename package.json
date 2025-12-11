@@ -1,0 +1,11 @@
+{
+  "name": "flash-arb-template",
+  "scripts": {
+    "anvil": "anvil --fork-url $RPC_URL",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "ethers": "^6.8.0",
+    "vitest": "^0.31.0"
+  }
+}

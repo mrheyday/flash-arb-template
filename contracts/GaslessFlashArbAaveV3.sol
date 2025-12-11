@@ -1,32 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/**
- * @title GaslessFlashArbAaveV3 (safe variant)
- * @notice Minimal, secure-by-design variant intended for tests:
- *  - exact nonce checking
- *  - executed guard
- *  - hook validation BEFORE state changes
- *  - pull-payment accounting (internal balances) and explicit withdraw
- *  - solver: 90% / treasury: 10% profit split
- *  - nonReentrant protection on external value transfers
- */
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 interface IHook {
     function validate(address executor, uint256 expectedProfitWei, bytes32 actionsHash) external view returns (bool);
 }
 
-contract GaslessFlashArbAaveV3 is ReentrancyGuard {
-    // ---- constants ----
-    uint256 private constant BASIS_POINTS = 10000;
-    uint256 private constant SOLVER_SHARE_BP = 9000; // 90%
+contract GaslessFlashArbAaveV3 is ReentrancyGuard, EIP712 {
+    bytes32 public constant ORDER_TYPEHASH =
+        keccak256("Order(address solver,uint256 nonce,uint256 expiry,uint256 expectedProfitWei,bytes32 actionsHash)");
 
-    // ---- events ----
+    uint256 private constant BASIS_POINTS = 10000;
+    uint256 private constant SOLVER_SHARE_BP = 9000;
+
     event OrderExecuted(bytes32 indexed digest, address indexed solver, uint256 profitWei);
     event Withdrawn(address indexed to, uint256 amount);
 
-    // ---- types ----
     struct SolverOrder {
         address solver;
         uint256 nonce;
@@ -35,17 +27,14 @@ contract GaslessFlashArbAaveV3 is ReentrancyGuard {
         bytes32 actionsHash;
     }
 
-    // ---- state ----
     address public immutable treasury;
     address public owner;
     IHook public hook;
-
     mapping(address => uint256) public nonces;
     mapping(bytes32 => bool) public executed;
-
     mapping(address => uint256) private _withdrawable;
 
-    constructor(address _treasury, address _hook) {
+    constructor(address _treasury, address _hook) EIP712("FlashArb", "1") {
         require(_treasury != address(0), "treasury zero");
         treasury = _treasury;
         owner = msg.sender;
@@ -57,28 +46,13 @@ contract GaslessFlashArbAaveV3 is ReentrancyGuard {
         _;
     }
 
-    /// @notice return how much `who` can withdraw
-    function withdrawable(address who) external view returns (uint256) {
-        return _withdrawable[who];
-    }
-
-    /**
-     * @notice Submit and execute a solver order.
-     *  Performs cheap checks then hook validation BEFORE state writes.
-     */
-    function submitOrderAndExecute(
+    function _verifySignature(
         SolverOrder memory order,
-        bytes calldata, /* signature - reserved */
-        bytes calldata  /* actions - reserved */
-    ) external payable {
-        require(order.solver != address(0), "solver zero");
-        require(order.expiry > block.timestamp, "expired");
-
-        uint256 cur = nonces[order.solver];
-        require(order.nonce == cur, "invalid nonce");
-
-        bytes32 digest = keccak256(
+        bytes calldata signature
+    ) internal view returns (address) {
+        bytes32 structHash = keccak256(
             abi.encode(
+                ORDER_TYPEHASH,
                 order.solver,
                 order.nonce,
                 order.expiry,
@@ -86,38 +60,48 @@ contract GaslessFlashArbAaveV3 is ReentrancyGuard {
                 order.actionsHash
             )
         );
+        bytes32 digest = _hashTypedDataV4(structHash);
+        return ECDSA.recover(digest, signature);
+    }
 
+    function submitOrderAndExecute(
+        SolverOrder memory order,
+        bytes calldata signature,
+        bytes calldata
+    ) external payable {
+        require(order.solver != address(0), "solver zero");
+        require(order.expiry > block.timestamp, "expired");
+        address recovered = _verifySignature(order, signature);
+        require(recovered == order.solver, "invalid signature");
+        require(order.nonce == nonces[order.solver], "invalid nonce");
+
+        bytes32 digest = keccak256(
+            abi.encode(order.solver, order.nonce, order.expiry, order.expectedProfitWei, order.actionsHash)
+        );
         require(!executed[digest], "already executed");
 
         if (address(hook) != address(0)) {
-            require(
-                hook.validate(order.solver, order.expectedProfitWei, order.actionsHash),
-                "hook validation failed"
-            );
+            require(hook.validate(order.solver, order.expectedProfitWei, order.actionsHash), "hook failed");
         }
 
-        nonces[order.solver] = cur + 1;
+        nonces[order.solver] ++;
         executed[digest] = true;
-
         require(msg.value == order.expectedProfitWei, "msg.value mismatch");
 
-        uint256 total = order.expectedProfitWei;
-        uint256 solverShare = (total * SOLVER_SHARE_BP) / BASIS_POINTS;
-        uint256 treasuryShare = total - solverShare;
-
+        uint256 solverShare = (order.expectedProfitWei * SOLVER_SHARE_BP) / BASIS_POINTS;
+        uint256 treasuryShare = order.expectedProfitWei - solverShare;
         _withdrawable[order.solver] += solverShare;
         _withdrawable[treasury] += treasuryShare;
 
-        emit OrderExecuted(digest, order.solver, total);
+        emit OrderExecuted(digest, order.solver, order.expectedProfitWei);
     }
 
     function withdraw() external nonReentrant {
         uint256 amount = _withdrawable[msg.sender];
-        require(amount != 0, "nothing to withdraw");
+        require(amount > 0, "nothing to withdraw");
         _withdrawable[msg.sender] = 0;
-
         (bool ok, ) = msg.sender.call{value: amount}("");
-        require(ok, "send failed");
+        require(ok, "withdraw failed");
         emit Withdrawn(msg.sender, amount);
     }
 

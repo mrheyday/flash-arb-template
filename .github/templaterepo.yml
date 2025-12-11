@@ -1,0 +1,9 @@
+name: Flash Arbitrage Full Stack
+about: Full flash arbitrage template with tests, CI, docs
+documentation: README.md
+features:
+  - Core contracts
+  - Foundry tests
+  - TypeScript helpers/tests
+  - CI workflows
+  - Docs

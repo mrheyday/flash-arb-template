@@ -1,0 +1,9 @@
+name: Foundry CI
+on: [push,pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge test --fork-url ${{ secrets.RPC_URL }} -vv
