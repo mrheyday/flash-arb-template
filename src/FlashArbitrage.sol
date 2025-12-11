@@ -15,6 +15,13 @@ contract FlashArbitrage is IFlashLoanRecipient {
     IBalancerVault public immutable balancerVault;
     IQuoterV2 public immutable uniswapQuoter;
 
+    // Uniswap V3 price limit constants (MIN_SQRT_RATIO + 1 and MAX_SQRT_RATIO - 1)
+    uint160 private constant MIN_SQRT_PRICE_LIMIT = 4295128740;
+    uint160 private constant MAX_SQRT_PRICE_LIMIT = 1461446703485210103287273052203988822378723970341;
+
+    // Swap deadline buffer in seconds
+    uint256 private constant SWAP_DEADLINE_BUFFER = 60;
+
     struct ArbitrageParams {
         address tokenIn;
         address tokenOut;
@@ -97,7 +104,9 @@ contract FlashArbitrage is IFlashLoanRecipient {
 
         // Check profitability
         if (finalBalance < totalDebt + params.minProfitAmount) {
-            revert InsufficientProfit(finalBalance - totalDebt, params.minProfitAmount);
+            // Safe calculation: we know finalBalance < totalDebt here
+            uint256 actualProfit = finalBalance > totalDebt ? finalBalance - totalDebt : 0;
+            revert InsufficientProfit(actualProfit, params.minProfitAmount);
         }
 
         // Repay flash loan
@@ -164,7 +173,7 @@ contract FlashArbitrage is IFlashLoanRecipient {
             toInternalBalance: false
         });
 
-        amountOut = balancerVault.swap(singleSwap, funds, 0, block.timestamp + 60);
+        amountOut = balancerVault.swap(singleSwap, funds, 0, block.timestamp + SWAP_DEADLINE_BUFFER);
     }
 
     /**
@@ -183,7 +192,7 @@ contract FlashArbitrage is IFlashLoanRecipient {
             address(this),
             zeroForOne,
             int256(amountIn),
-            zeroForOne ? 4295128740 : 1461446703485210103287273052203988822378723970341,
+            zeroForOne ? MIN_SQRT_PRICE_LIMIT : MAX_SQRT_PRICE_LIMIT,
             ""
         );
 
