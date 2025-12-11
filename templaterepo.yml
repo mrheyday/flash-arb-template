@@ -1,0 +1,15 @@
+name: Flash Arbitrage Full Stack
+about: |
+  A reusable template for a flash arbitrage repository containing:
+  - Solidity smart contracts (Aave V3 flash loans, multi-DEX routing)
+  - Foundry fork tests
+  - TypeScript helpers + integration tests
+  - Docs with Mermaid / static fallback SVGs
+  - CI workflows (Foundry, TS, Pages with diagrams)
+documentation: README.md
+features:
+  - Smart contract stack
+  - Foundry and TS testing
+  - Documentation with diagrams
+  - GitHub Actions CI workflows
+  - GitHub Pages provisioning
